@@ -1,0 +1,94 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "AI Readiness Voice API",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/respondent/{token}": {
+      "get": {
+        "operationId": "getRespondent",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 22 }
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${GET_RESPONDENT_LAMBDA_ARN}",
+          "payloadFormatVersion": "2.0"
+        }
+      }
+    },
+    "/api/realtime/ephemeral": {
+      "post": {
+        "operationId": "createEphemeral",
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${CREATE_EPHEMERAL_LAMBDA_ARN}",
+          "payloadFormatVersion": "2.0"
+        }
+      }
+    },
+    "/api/submission/{token}": {
+      "get": {
+        "operationId": "getSubmission",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${GET_SUBMISSION_LAMBDA_ARN}",
+          "payloadFormatVersion": "2.0"
+        }
+      },
+      "post": {
+        "operationId": "putSubmission",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${PUT_SUBMISSION_LAMBDA_ARN}",
+          "payloadFormatVersion": "2.0"
+        }
+      }
+    },
+    "/api/submission/{token}/clear": {
+      "post": {
+        "operationId": "clearSubmission",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${CLEAR_SUBMISSION_LAMBDA_ARN}",
+          "payloadFormatVersion": "2.0"
+        }
+      }
+    }
+  }
+}

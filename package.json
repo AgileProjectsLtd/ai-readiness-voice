@@ -1,0 +1,17 @@
+{
+  "name": "ai-readiness-voice",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time voice AI readiness interview app with OpenAI Realtime API",
+  "scripts": {
+    "build:frontend": "cd frontend && npm run build",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "package:backend": "cd backend && npm run package",
+    "deploy": "bash infra/aws/deploy.sh",
+    "generate-token": "node scripts/generate-token.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
