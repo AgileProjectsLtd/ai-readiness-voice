@@ -1,7 +1,9 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { lookupToken, isValidTokenFormat } from '../lib/allowlist';
-import { getJson, putJson } from '../lib/s3';
 import { created, notFound, badRequest, serverError } from '../lib/response';
+import { loadDimensions } from '../lib/dimensions';
+import { writeSubmission } from '../lib/submission';
+import { sendScoreEmail } from '../lib/email';
 
 const MAX_RATIONALE_LENGTH = 2000;
 const MAX_TRANSCRIPT_LENGTH = 500_000;
@@ -9,20 +11,12 @@ const MAX_EVIDENCE_ITEMS = 20;
 const MAX_EVIDENCE_LENGTH = 1000;
 const MAX_EDIT_LOG_ENTRIES = 200;
 
-interface DimensionsConfig {
-  categories: Array<{
-    dimensions: Array<{ id: string }>;
-  }>;
-}
-
 let validDimensionIds: Set<string> | null = null;
 
 async function loadValidDimensionIds(): Promise<Set<string>> {
   if (validDimensionIds) return validDimensionIds;
 
-  const config = await getJson<DimensionsConfig>('config/dimensions.json');
-  if (!config?.categories) throw new Error('Dimensions config not found in S3');
-
+  const config = await loadDimensions();
   const ids = new Set<string>();
   for (const cat of config.categories) {
     for (const dim of cat.dimensions) {
@@ -110,23 +104,25 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
 
     const now = new Date().toISOString();
-    const submission = {
+    const respondent = { name: entry.respondentName, company: entry.companyName };
+
+    await writeSubmission({
       token,
-      respondent: {
-        name: entry.respondentName,
-        company: entry.companyName,
-      },
+      respondent,
       completedAt: now,
       dimensions: sanitizedDimensions,
       ...(interview && { interview }),
       ...(userEdits && { userEdits }),
       version: '1.0',
-    };
+    });
 
-    const ts = now.replace(/[:.]/g, '-');
-
-    await putJson(`submissions/${token}/final/${ts}.json`, submission);
-    await putJson(`submissions/${token}/latest.json`, submission);
+    const dimensionsConfig = await loadDimensions();
+    await sendScoreEmail({
+      respondent,
+      completedAt: now,
+      dimensions: sanitizedDimensions,
+      dimensionsConfig,
+    });
 
     return created({ success: true, completedAt: now });
   } catch (err) {

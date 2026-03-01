@@ -106,6 +106,33 @@ echo "Enabled default encryption (SSE-S3) on $DATA_BUCKET"
 echo ""
 
 # ─────────────────────────────────────────────────
+# 1b. SQS Queue for async scoring
+# ─────────────────────────────────────────────────
+echo "--- Creating SQS queue ---"
+
+SCORE_QUEUE_NAME="${PROJECT}-${ENV}-score-queue"
+
+QUEUE_URL=$(aws sqs create-queue \
+  --queue-name "$SCORE_QUEUE_NAME" \
+  --attributes '{"VisibilityTimeout":"120","MessageRetentionPeriod":"3600"}' \
+  --query 'QueueUrl' --output text 2>/dev/null || true)
+
+if [ -n "$QUEUE_URL" ] && [ "$QUEUE_URL" != "None" ]; then
+  echo "SQS queue ready: $SCORE_QUEUE_NAME"
+else
+  QUEUE_URL=$(aws sqs get-queue-url --queue-name "$SCORE_QUEUE_NAME" --query 'QueueUrl' --output text)
+  echo "SQS queue already exists: $SCORE_QUEUE_NAME"
+fi
+
+QUEUE_ARN=$(aws sqs get-queue-attributes \
+  --queue-url "$QUEUE_URL" \
+  --attribute-names QueueArn \
+  --query 'Attributes.QueueArn' --output text)
+
+echo "Queue ARN: $QUEUE_ARN"
+echo ""
+
+# ─────────────────────────────────────────────────
 # 2. IAM Role for Lambda
 # ─────────────────────────────────────────────────
 echo "--- Setting up IAM role ---"
@@ -152,6 +179,21 @@ POLICY=$(cat <<EOF
     },
     {
       "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::${DATA_BUCKET}/jobs/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["sqs:SendMessage"],
+      "Resource": "${QUEUE_ARN}"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+      "Resource": "${QUEUE_ARN}"
+    },
+    {
+      "Effect": "Allow",
       "Action": ["s3:ListBucket"],
       "Resource": "arn:aws:s3:::${DATA_BUCKET}"
     },
@@ -162,6 +204,11 @@ POLICY=$(cat <<EOF
         "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${SECRET_NAME}*",
         "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:${ADMIN_SECRET_NAME}*"
       ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+      "Resource": "*"
     },
     {
       "Effect": "Allow",
@@ -198,6 +245,16 @@ if [ -z "${ROLE_ARN:-}" ]; then
   fi
 fi
 
+# Ensure QUEUE_URL is available (already set in full mode)
+if [ -z "${QUEUE_URL:-}" ]; then
+  SCORE_QUEUE_NAME="${PROJECT}-${ENV}-score-queue"
+  QUEUE_URL=$(aws sqs get-queue-url --queue-name "$SCORE_QUEUE_NAME" --query 'QueueUrl' --output text 2>/dev/null || true)
+  if [ -z "$QUEUE_URL" ] || [ "$QUEUE_URL" = "None" ]; then
+    echo "WARNING: SQS queue $SCORE_QUEUE_NAME not found. Run a full deploy first to create it."
+    QUEUE_URL=""
+  fi
+fi
+
 echo "--- Building backend ---"
 
 cd "$ROOT_DIR/backend"
@@ -225,7 +282,7 @@ echo ""
 # ─────────────────────────────────────────────────
 echo "--- Deploying Lambda functions ---"
 
-LAMBDA_ENV="Variables={DATA_BUCKET=${DATA_BUCKET},OPENAI_SECRET_NAME=${SECRET_NAME},ADMIN_SECRET_NAME=${ADMIN_SECRET_NAME},AWS_REGION_OVERRIDE=${REGION},ALLOWED_ORIGIN=https://${CUSTOM_DOMAIN}}"
+LAMBDA_ENV="Variables={DATA_BUCKET=${DATA_BUCKET},OPENAI_SECRET_NAME=${SECRET_NAME},ADMIN_SECRET_NAME=${ADMIN_SECRET_NAME},AWS_REGION_OVERRIDE=${REGION},ALLOWED_ORIGIN=https://${CUSTOM_DOMAIN},SCORE_QUEUE_URL=${QUEUE_URL},NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL:-},SES_REGION=${SES_REGION:-}}"
 
 FUNC_NAMES=(
   "${PROJECT}-${ENV}-get-respondent"
@@ -235,6 +292,9 @@ FUNC_NAMES=(
   "${PROJECT}-${ENV}-clear-submission"
   "${PROJECT}-${ENV}-admin-dashboard"
   "${PROJECT}-${ENV}-get-config"
+  "${PROJECT}-${ENV}-score-enqueue"
+  "${PROJECT}-${ENV}-score-worker"
+  "${PROJECT}-${ENV}-get-score-result"
 )
 
 FUNC_HANDLERS=(
@@ -245,6 +305,9 @@ FUNC_HANDLERS=(
   "handlers/clearSubmission.handler"
   "handlers/adminDashboard.handler"
   "handlers/getConfig.handler"
+  "handlers/scoreEnqueue.handler"
+  "handlers/scoreWorker.handler"
+  "handlers/getScoreResult.handler"
 )
 
 deploy_lambda() {
@@ -375,10 +438,12 @@ ROUTE_KEYS=(
   "GET /api/respondent/{token}"
   "POST /api/realtime/ephemeral"
   "GET /api/submission/{token}"
-  "POST /api/submission/{token}"
+  "PUT /api/submission/{token}"
   "POST /api/submission/{token}/clear"
   "GET /api/admin/dashboard"
   "GET /api/config/dimensions"
+  "POST /api/score"
+  "GET /api/score/{jobId}"
 )
 
 ROUTE_FUNCS=(
@@ -389,6 +454,8 @@ ROUTE_FUNCS=(
   "${PROJECT}-${ENV}-clear-submission"
   "${PROJECT}-${ENV}-admin-dashboard"
   "${PROJECT}-${ENV}-get-config"
+  "${PROJECT}-${ENV}-score-enqueue"
+  "${PROJECT}-${ENV}-get-score-result"
 )
 
 ensure_route() {
@@ -415,6 +482,16 @@ for r in routes:
       --integration-id "$existing_route_id" \
       --integration-uri "$func_arn" \
       --no-cli-pager 2>/dev/null || true
+
+    # Ensure invoke permission exists (idempotent — silently fails if already present)
+    aws lambda add-permission \
+      --function-name "$func_name" \
+      --statement-id "apigateway-${func_name}" \
+      --action "lambda:InvokeFunction" \
+      --principal "apigateway.amazonaws.com" \
+      --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
+      --no-cli-pager 2>/dev/null || true
+
     echo "  Updated route: $route_key -> $func_name"
     return
   fi
@@ -426,6 +503,7 @@ for r in routes:
     --integration-type AWS_PROXY \
     --integration-uri "$func_arn" \
     --payload-format-version "2.0" \
+    --timeout-in-millis 30000 \
     --query 'IntegrationId' --output text 2>/dev/null || true)
 
   if [ -n "$integration_id" ] && [ "$integration_id" != "None" ]; then
@@ -469,6 +547,29 @@ echo "Applied stage-level throttle: 10 burst / 5 sustained req/s"
 
 API_ENDPOINT=$(aws apigatewayv2 get-api --api-id "$API_ID" --query 'ApiEndpoint' --output text)
 echo "API endpoint: $API_ENDPOINT"
+echo ""
+
+# ─────────────────────────────────────────────────
+# 5b. SQS event source mapping for score-worker
+# ─────────────────────────────────────────────────
+echo "--- Configuring SQS trigger for score-worker ---"
+WORKER_FUNC="${PROJECT}-${ENV}-score-worker"
+EXISTING_MAPPING=$(aws lambda list-event-source-mappings \
+  --function-name "$WORKER_FUNC" \
+  --event-source-arn "$QUEUE_ARN" \
+  --query 'EventSourceMappings[0].UUID' --output text 2>/dev/null || true)
+
+if [ -z "$EXISTING_MAPPING" ] || [ "$EXISTING_MAPPING" = "None" ]; then
+  aws lambda create-event-source-mapping \
+    --function-name "$WORKER_FUNC" \
+    --event-source-arn "$QUEUE_ARN" \
+    --batch-size 1 \
+    --no-cli-pager
+  echo "Created SQS event source mapping for $WORKER_FUNC"
+else
+  echo "SQS event source mapping already exists for $WORKER_FUNC (UUID: $EXISTING_MAPPING)"
+fi
+
 echo ""
 
 fi # end full-only: API Gateway
@@ -716,7 +817,9 @@ if [ -z "$DIST_ID" ] || [ "$DIST_ID" = "None" ]; then
         "CustomOriginConfig": {
           "HTTPPort": 80,
           "HTTPSPort": 443,
-          "OriginProtocolPolicy": "https-only"
+          "OriginProtocolPolicy": "https-only",
+          "OriginReadTimeout": 60,
+          "OriginKeepaliveTimeout": 5
         }
       }
     ]

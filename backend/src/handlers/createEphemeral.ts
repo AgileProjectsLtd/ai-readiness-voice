@@ -1,44 +1,10 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { lookupToken, isValidTokenFormat } from '../lib/allowlist';
 import { getOpenAIKey } from '../lib/secrets';
-import { getJson } from '../lib/s3';
 import { ok, notFound, badRequest, serverError } from '../lib/response';
+import { DimensionsConfig, loadDimensions, formatDimensionsBlock, totalDimensionCount } from '../lib/dimensions';
 import * as fs from 'fs';
 import * as path from 'path';
-
-interface DimensionsConfig {
-  categories: Array<{
-    id: string;
-    label: string;
-    prefix?: string;
-    dimensions: Array<{ id: string; statement: string }>;
-  }>;
-}
-
-let cachedDimensions: DimensionsConfig | null = null;
-
-async function loadDimensions(): Promise<DimensionsConfig> {
-  if (cachedDimensions) return cachedDimensions;
-  const config = await getJson<DimensionsConfig>('config/dimensions.json');
-  if (!config?.categories) throw new Error('Dimensions config not found in S3');
-  cachedDimensions = config;
-  return config;
-}
-
-function formatDimensionsBlock(config: DimensionsConfig): string {
-  const lines: string[] = [];
-  let num = 1;
-  for (const cat of config.categories) {
-    const prefix = cat.prefix || cat.dimensions[0]?.id.match(/^([a-z]+)_/)?.[1] || '';
-    lines.push(`${cat.label} (${prefix}_):`);
-    for (const dim of cat.dimensions) {
-      lines.push(`${num}. ${dim.id}: ${dim.statement}`);
-      num++;
-    }
-    lines.push('');
-  }
-  return lines.join('\n').trim();
-}
 
 function buildSystemInstructions(name: string, company: string, dimensions: DimensionsConfig): string {
   const templatePath = path.join(__dirname, '..', 'config', 'systemPrompt.v1.txt');
@@ -50,13 +16,11 @@ function buildSystemInstructions(name: string, company: string, dimensions: Dime
     template = fs.readFileSync(path.join(__dirname, 'config', 'systemPrompt.v1.txt'), 'utf-8');
   }
 
-  const totalDims = dimensions.categories.reduce((sum, cat) => sum + cat.dimensions.length, 0);
-
   return template
     .replace('{{RESPONDENT_NAME}}', name)
     .replace('{{COMPANY_NAME}}', company)
     .replace('{{DIMENSIONS_BLOCK}}', formatDimensionsBlock(dimensions))
-    .replace(/{{DIMENSION_COUNT}}/g, String(totalDims));
+    .replace(/{{DIMENSION_COUNT}}/g, String(totalDimensionCount(dimensions)));
 }
 
 export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
@@ -89,21 +53,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        session: {
-          type: 'realtime',
-          model: 'gpt-realtime',
-          instructions,
-          audio: {
-            input: {
-              transcription: {
-                model: 'gpt-4o-mini-transcribe',
-              },
-            },
-            output: {
-              voice: 'shimmer',
-            },
-          },
-        },
+        session: { type: 'realtime', model: 'gpt-realtime-1.5' },
       }),
     });
 
@@ -118,8 +68,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const secret = result.session?.client_secret ?? result.client_secret ?? result;
     return ok({
       clientSecret: secret.value,
-      sessionId: result.id,
-      expiresAt: secret.expires_at,
+      instructions,
     });
   } catch (err) {
     console.error('createEphemeral error:', JSON.stringify(err));

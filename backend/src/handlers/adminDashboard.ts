@@ -1,7 +1,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { getJson } from '../lib/s3';
 import { ok, unauthorized, serverError } from '../lib/response';
-import { AllowlistEntry, AllowlistFile } from '../lib/allowlist';
+import { AllowlistFile } from '../lib/allowlist';
 import { getAdminKey } from '../lib/secrets';
 
 interface SubmissionDimension {

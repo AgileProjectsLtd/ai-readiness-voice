@@ -9,7 +9,11 @@
     "build:backend": "cd backend && npm run build",
     "package:backend": "cd backend && npm run package",
     "deploy": "bash infra/aws/deploy.sh",
-    "generate-token": "node scripts/generate-token.js"
+    "generate-token": "node scripts/generate-token.js",
+    "test": "cd backend && npm test && cd ../frontend && npm test",
+    "test:backend": "cd backend && npm test",
+    "test:frontend": "cd frontend && npm test",
+    "test:coverage": "cd backend && npm run test:coverage && cd ../frontend && npm run test:coverage"
   },
   "engines": {
     "node": ">=20.0.0"
