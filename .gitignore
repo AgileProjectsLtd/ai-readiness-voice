@@ -10,11 +10,12 @@ backend/lambda-package.zip
 .env
 .env.*
 
-# Generated allowlist (contains tokens — never commit)
+# Allowlist (contains tokens — never commit)
 allowlist.json
+allowlist.csv
 
 # Private dimensions config (contains real interview questions)
-config/
+config/dimensions.json
 
 # OS files
 .DS_Store

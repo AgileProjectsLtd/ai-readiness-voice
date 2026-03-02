@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "scale": {
+    "min": 1,
+    "max": 5,
+    "labels": {
+      "1": "Strongly Disagree / None",
+      "2": "Mostly Disagree / Ad-hoc",
+      "3": "Neutral / Emerging",
+      "4": "Mostly Agree / Scaled",
+      "5": "Strongly Agree / Enterprise-wide"
+    }
+  },
+  "categories": [
+    {
+      "id": "strategy",
+      "label": "Strategy & Vision",
+      "prefix": "st",
+      "dimensions": [
+        {
+          "id": "st_clear_strategy",
+          "statement": "The organisation has a clearly articulated strategy linked to business objectives."
+        },
+        {
+          "id": "st_defined_boundaries",
+          "statement": "Leadership has defined where to focus investment and manage risk."
+        },
+        {
+          "id": "st_prioritised_roadmap",
+          "statement": "There is a prioritised roadmap outlining near-term and long-term initiatives."
+        },
+        {
+          "id": "st_success_metrics",
+          "statement": "The organisation has defined success metrics beyond experimentation."
+        }
+      ]
+    },
+    {
+      "id": "operations",
+      "label": "Operations & Delivery",
+      "prefix": "op",
+      "dimensions": [
+        {
+          "id": "op_clear_operating_model",
+          "statement": "The organisation has a clear operating model with defined roles and responsibilities."
+        },
+        {
+          "id": "op_pilot_to_production",
+          "statement": "There are established processes for moving from pilot to production."
+        },
+        {
+          "id": "op_cross_team_coordination",
+          "statement": "The organisation has mechanisms to coordinate efforts across teams."
+        },
+        {
+          "id": "op_role_clarity",
+          "statement": "Roles and responsibilities for development, deployment, and ownership are clear."
+        }
+      ]
+    },
+    {
+      "id": "people",
+      "label": "People & Capability",
+      "prefix": "pe",
+      "dimensions": [
+        {
+          "id": "pe_literacy_by_role",
+          "statement": "The organisation actively builds capability appropriate to different roles."
+        },
+        {
+          "id": "pe_training_and_tools",
+          "statement": "Staff have access to practical training, tools, and guidance."
+        },
+        {
+          "id": "pe_talent_access",
+          "statement": "The organisation can attract, develop, or access the technical talent required."
+        },
+        {
+          "id": "pe_pathways_to_contribute",
+          "statement": "There are clear pathways for employees to propose, test, and refine ideas."
+        }
+      ]
+    }
+  ]
+}

@@ -45,7 +45,7 @@ export async function startInterview() {
       onInterviewComplete() {
         log('interview_complete tool fired');
         state.interviewCompleteSignalled = true;
-        setStatus('speaking', 'Wrapping up...');
+        setStatus('speaking', 'Wrapping up and generating scorecard...');
         enqueueScoring();
       },
       onError(error) {
